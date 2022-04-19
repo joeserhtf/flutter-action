@@ -28,6 +28,10 @@ inputs:
     description: 'The architecture of Flutter SDK executable (x64 or arm64)'
     required: false
     default: 'x64'
+  test-flag:
+    description: 'Flag for test mode'
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
@@ -36,5 +40,5 @@ runs:
       with:
         path: ${{ inputs.cache-path }}
         key: ${{ inputs.cache-key }}-${{ inputs.channel }}-${{ inputs.flutter-version }}
-    - run: $GITHUB_ACTION_PATH/setup.sh -c "${{ inputs.cache-path }}" ${{ inputs.channel }} ${{ inputs.flutter-version }} ${{ inputs.architecture }}
+    - run: $GITHUB_ACTION_PATH/setup.sh -c "${{ inputs.cache-path }}" ${{ inputs.test-flag }}${{ inputs.channel }} ${{ inputs.flutter-version }} ${{ inputs.architecture }}
       shell: bash
