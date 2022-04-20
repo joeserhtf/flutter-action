@@ -95,24 +95,42 @@ transform_path() {
 
 help_usage() {
   echo "USAGE:"
-  echo "$0 [-c cache/path] [-t] <channel> <version> <architecture>"
+  echo "$0 [-c cache/path] [-t] [channel] [version] [architecture]"
+  echo ""
+  echo "EXAMPLES:"
+  echo "$0                # download latest stable version"
+  echo "$0 stable         # download latest beta version"
+  echo "$0 beta           # download latest beta version"
+  echo "$0 master         # download mater version"
+  echo "$0 any            # download latest version in any channel"
+  echo "$0 stable 2.2     # download 2.2.x version from stable channel"
+  echo "$0 stable 2.2.x   # download 2.2.x version from stable channel"
+  echo "$0 beta 2 arm64   # download 2.x version from beta channel with arm64 architecture"
+  echo "$0 -c /tmp beta   # download latest beta version and cache it to /tmp"
+  echo "$0 -t             # display latest stable version (not download)"
+}
+
+not_found_error() {
+  echo "Unable to determine Flutter version for channel: $1 version: $2 architecture: $3"
 }
 
 CACHE_PATH=""
 TEST_MODE=false
+TEST_EXPECTED=""
 
-if [ "$#" -eq 0 ]; then
-  help_usage
-  exit 0
-fi
-
-while getopts ':h:dc:' flag; do
+while getopts 'htc:x:' flag; do
   case "${flag}" in
   c) CACHE_PATH="$OPTARG" ;;
-  d) TEST_MODE=true ;;
+  t) TEST_MODE=true ;;
+  x) TEST_EXPECTED="$OPTARG" ;;
   h)
     help_usage
     exit 0
+    ;;
+  *)
+    echo ""
+    help_usage
+    exit 1
     ;;
   esac
 done
@@ -121,13 +139,40 @@ CHANNEL="${@:$OPTIND:1}"
 VERSION="${@:$OPTIND+1:1}"
 ARCH="${@:$OPTIND+2:1}"
 
-if [[ -z $CHANNEL ]] || [[ -z $VERSION ]] || [[ -z $ARCH ]]; then
-  help_usage
-  exit 2
-fi
+# default values
+[[ -z $CHANNEL ]] && CHANNEL=stable
+[[ -z $VERSION ]] && VERSION=any
+[[ -z $ARCH ]] && ARCH=x64
+
+test_assert() {
+  echo "${1}" | head -n 1 | awk -F'|' '{print $2}' | grep "^${2}$"
+  echo $?
+}
 
 SDK_CACHE="$(transform_path ${CACHE_PATH})"
 PUB_CACHE="$(transform_path ${CACHE_PATH}/.pub-cache)"
+
+if [ "$TEST_MODE" = true ]; then
+  if [[ $CHANNEL == master ]]; then
+    echo "master:master"
+    exit 0
+  else
+    VERSION_MANIFEST=$(get_version_manifest $TEST_MODE $CHANNEL $VERSION)
+
+    if [[ $VERSION_MANIFEST == null ]]; then
+      not_found_error $CHANNEL $VERSION $ARCH
+      exit 1
+    fi
+
+    VERSION_DEBUG=$(echo $VERSION_MANIFEST | jq -j '.channel,":",.version,":",.dart_sdk_arch')
+
+    echo "$CHANNEL:$VERSION:$ARCH|$VERSION_DEBUG"
+    echo "---"
+    echo $VERSION_MANIFEST | jq
+    echo $VERSION_DEBUG | grep -q "^${TEST_EXPECTED}$"
+    exit $?
+  fi
+fi
 
 if [[ ! -x "${SDK_CACHE}/bin/flutter" ]]; then
   if [[ $CHANNEL == master ]]; then
@@ -136,21 +181,12 @@ if [[ ! -x "${SDK_CACHE}/bin/flutter" ]]; then
     VERSION_MANIFEST=$(get_version_manifest $TEST_MODE $CHANNEL $VERSION)
 
     if [[ $VERSION_MANIFEST == null ]]; then
-      echo "Unable to determine Flutter version for channel: $CHANNEL version: $VERSION architecture: $ARCH"
+      not_found_error $CHANNEL $VERSION $ARCH
       exit 1
     fi
 
-    if [ "$TEST_MODE" = true ]; then
-      VERSION_DEBUG=$(echo $VERSION_MANIFEST | jq -j '.channel,":",.version,":",.dart_sdk_arch')
-
-      echo "$CHANNEL:$VERSION:$ARCH|$VERSION_DEBUG"
-      echo "---"
-      echo $VERSION_MANIFEST | jq
-      exit 0
-    else
-      ARCHIVE_PATH=$(echo $VERSION_MANIFEST | jq -r '.archive')
-      download_archive "$ARCHIVE_PATH" "$SDK_CACHE"
-    fi
+    ARCHIVE_PATH=$(echo $VERSION_MANIFEST | jq -r '.archive')
+    download_archive "$ARCHIVE_PATH" "$SDK_CACHE"
   fi
 fi
 
